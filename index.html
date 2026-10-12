@@ -93,6 +93,27 @@
   .controls button:disabled { opacity: 0.4; cursor: not-allowed; }
   .note { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 10px; }
 
+  /* LIVE LISTINGS (data from Supabase) */
+  .live {
+    display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px;
+    padding: 4px 12px; border-radius: 999px; font-size: 0.8rem;
+    color: var(--accent); background: rgba(94, 234, 212, 0.08); border: 1px solid rgba(94, 234, 212, 0.3);
+  }
+  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: blink 1.6s infinite; }
+  .place { display: flex; flex-direction: column; gap: 8px; }
+  .place h3 { margin-bottom: 0; }
+  .place .cat { color: var(--accent); font-size: 0.85rem; }
+  .place .rating { font-size: 0.9rem; }
+  .place .rating small { color: var(--muted); }
+  .place .loc { color: var(--muted); font-size: 0.9rem; }
+  .place .link {
+    margin-top: auto; padding-top: 8px; font-size: 0.9rem; font-weight: 600;
+    color: var(--accent); text-decoration: none;
+  }
+  .place .link:hover { text-decoration: underline; }
+  .skeleton { min-height: 170px; opacity: 0.5; animation: blink 1.6s infinite; }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); }
+
   /* FOOTER */
   footer { text-align: center; padding: 64px 0 40px; }
   footer h2 { margin-bottom: 10px; }
@@ -168,7 +189,19 @@
     </div>
   </section>
 
-  <!-- 4. INTERACTIVE SIMULATION -->
+  <!-- 4. LIVE PROPERTY LISTINGS (Week 4: data from Supabase) -->
+  <section id="listings">
+    <h2>Live Property Listings</h2>
+    <p class="sub">Villas collected automatically from Google Maps by an n8n + Apify pipeline and stored in Supabase.</p>
+    <div class="live"><span class="dot"></span><span id="live-status">Connecting to database…</span></div>
+    <div class="grid3" id="places">
+      <div class="card skeleton"></div>
+      <div class="card skeleton"></div>
+      <div class="card skeleton"></div>
+    </div>
+  </section>
+
+  <!-- 5. INTERACTIVE SIMULATION -->
   <section id="demo">
     <h2>Try a Conversation</h2>
     <p class="sub">Pick a scenario and watch how Cyles responds.</p>
@@ -187,7 +220,7 @@
 
 </main>
 
-<!-- 5. FOOTER & CTA -->
+<!-- 6. FOOTER & CTA -->
 <footer class="wrap">
   <h2>Looking for a villa or property?</h2>
   <p>Chat with us to explore the properties and services we offer.</p>
@@ -254,6 +287,93 @@
   }
 
   buttons.forEach(b => b.addEventListener('click', () => play(b.dataset.key)));
+</script>
+
+<script>
+  // ===== Week 4 Level 1: read live data from Supabase =====
+  // Publishable key is safe to show in a public web page (read-only, protected by RLS).
+  // NEVER put the secret key (sb_secret_...) here.
+  const SUPABASE_URL = 'https://cmvxeiwfabnihydywnib.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_ISI_DI_SINI';
+
+  const placesEl = document.getElementById('places');
+  const statusEl = document.getElementById('live-status');
+
+  function showMessage(text) {
+    placesEl.replaceChildren();
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = text;
+    placesEl.appendChild(p);
+  }
+
+  function placeCard(p) {
+    const card = document.createElement('div');
+    card.className = 'card place';
+
+    const cat = document.createElement('div');
+    cat.className = 'cat';
+    cat.textContent = p.category_name || 'Property';
+
+    const title = document.createElement('h3');
+    title.textContent = p.title;
+
+    const rating = document.createElement('div');
+    rating.className = 'rating';
+    if (p.total_score) {
+      rating.textContent = '⭐ ' + Number(p.total_score).toFixed(1) + ' ';
+      const small = document.createElement('small');
+      small.textContent = '(' + (p.reviews_count || 0) + ' reviews)';
+      rating.appendChild(small);
+    } else {
+      rating.textContent = '⭐ No rating yet';
+    }
+
+    const loc = document.createElement('div');
+    loc.className = 'loc';
+    loc.textContent = '📍 ' + ([p.city, p.state].filter(Boolean).join(', ') || 'Bali');
+
+    card.append(cat, title, rating, loc);
+
+    if (p.url && p.url.startsWith('https://')) {
+      const a = document.createElement('a');
+      a.className = 'link';
+      a.href = p.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'View on Google Maps →';
+      card.appendChild(a);
+    }
+    return card;
+  }
+
+  async function loadPlaces() {
+    try {
+      const res = await fetch(
+        SUPABASE_URL + '/rest/v1/places?select=*&order=reviews_count.desc.nullslast&limit=12',
+        { headers: { apikey: SUPABASE_KEY } }
+      );
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const rows = await res.json();
+
+      if (!rows.length) {
+        statusEl.textContent = 'Connected · no listings yet';
+        showMessage('No properties in the database yet.');
+        return;
+      }
+
+      placesEl.replaceChildren(...rows.map(placeCard));
+      const newest = rows.map(r => r.created_at).filter(Boolean).sort().pop();
+      statusEl.textContent = 'Live · ' + rows.length + ' properties' +
+        (newest ? ' · updated ' + new Date(newest).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+    } catch (e) {
+      console.error('Failed to load listings:', e);
+      statusEl.textContent = 'Offline';
+      showMessage('Could not load listings right now. Please try again later.');
+    }
+  }
+
+  loadPlaces();
 </script>
 </body>
 </html>
